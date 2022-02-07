@@ -24,32 +24,57 @@ module.exports = grammar({
 
   inline: $ => [$.function_val],
 
+
+  extras: $ => [
+    /\s/,
+    $.comment,
+  ],
+
   rules: {
-    // TODO: add the actual grammar rules
+
     source_file: $ => $.query_root,
 
     word: $ => $.identifier,
 
-    identifier: $ => /[a-z_]+/,
+    comment: $ => token(prec(-10, /#.*\n*/)),
 
-    query_root: $ => seq("query", optional($.string_lit), optional($.query_args), $.query_block),
-
-    directive: $ => seq("@", $.string_lit, optional(seq("(", commaSep(seq($.string_lit, ":", $.expr)), ")"))),
-
-    query_block: $ => seq('{', repeat($.query), '}'),
+    query_root: $ => seq("query",
+      field("name", optional($.identifier)),
+      field("args", optional($.query_args)),
+      field("query", seq('{', repeat($.query), '}'))),
 
     query_args: $ => seq('(', commaSep($.query_args_value), ')'),
 
-    query_args_value: $ => seq($.dollar_lit, ':', $.string_lit, optional(seq("=", seq("\"", $.string_lit, "\"")))),
+    query_args_value: $ => seq("$", field("name", $.identifier), ':', field("type", $.identifier), field("value", optional(seq("=", $.escaped_string_lit)))),
 
-    query: $ => seq($.alphanumeric_lit, "(", "func:", $.function, optional(seq(",", $.pagination)), ")", repeat($.directive), block(repeat($.pred))),
+    query: $ => seq(
+      field("name", $.identifier), "(", "func", ":",
+      field("function", $.function),
+      field("page_ord", optional(seq(",", $.page_order))), ")",
+      field("filter", optional($.filter)),
+      field("directive", repeat($.directive)),
+      field("query", block(repeat($.query_line)))),
 
-    pred: $ => seq(optional(seq($.string_lit, ":")), $.pred_value,
-      optional($.filter), optional(seq("(", $.pagination, ")")), optional(block(repeat($.pred)))),
+    query_line: $ => seq(optional(seq(field("alias", $.identifier), ":")), choice(seq(field("variable", $.identifier), choice("as", "AS"), field("value", $.pred_value)), field("value", $.pred_value)),
+      field("filter", optional($.filter)), field("groupby", optional($.groupby)), field("page_ord", optional(seq("(", $.page_order, ")"))), field("query", optional(block(repeat($.query_line))))),
 
-    filter: $ => seq("@filter", "(", $.function, ")"),
+    directive: $ => seq("@", field("name", $.identifier), optional(seq("(", field("values", commaSep(seq($.identifier, ":", $.value))), ")"))),
 
-    function: $ => $.function_val,
+    filter: $ => seq("@filter", "(", repeat1($.filter_expr), ")"),
+
+    filter_expr: $ => choice(
+      field("function", $.function),
+      $.filter_unary,
+      $.filter_binary,
+    ),
+
+
+
+    filter_unary: $ => prec.left(3, seq(choice("not", "NOT"), $.filter_expr)),
+
+    filter_binary: $ => choice(
+      prec.left(1, seq($.filter_expr, choice("or", "OR"), $.filter_expr)),
+      prec.left(2, seq($.filter_expr, choice("and", "AND"), $.filter_expr))),
 
     facet: $ => seq("@facets", optional("(",), commaSep(choice(
       $.function,
@@ -57,27 +82,35 @@ module.exports = grammar({
       seq($.pred_lit, ":", $.pred_lit),
     ))),
 
-    pagination: $ => commaSep1(
+    page_order: $ => commaSep1(
       choice(
-        seq(choice("first", "offset", "after"), ":", $.expr)),
-      seq(choice("orderasc", "orderdesc"), ":", $.expr)),
+        seq(choice("first", "offset", "after"), ":", $.value)),
+      seq(choice("orderasc", "orderdesc"), ":", $.value)),
 
-    function_val: $ => seq(alias($.identifier, "name"), "(",
-      choice(
-        $.expr,
-        seq($.pred_lit, ",", $.expr),
-      ), ")"),
+    function: $ => seq(field("name", $.identifier), "(",
+      field("value", $.expr), ")"),
 
-    string_lit: $ => /\w*[._A-Za-z]\w*/,
-
-    alphanumeric_lit: $ => /\w[a-zA-Z0-9_]\w*/,
+    groupby: $ => seq("@groupby", "(", $.pred_lit, ")"),
 
     expr: $ => choice(
-      seq("\"", optional($.string_lit), "\""),
+      commaSep1($.value),
+      seq($.pred_lit, "[", commaSep1($.value), "]"),
+    ),
+
+    value: $ => choice(
+      $.escaped_string_lit,
       $.dollar_lit,
       hexLiteral,
       decimalLiteral,
+      $.pred_lit
     ),
+
+    escaped_string_lit: $ => seq("\"", optional($.identifier), "\""),
+
+    identifier: $ => /\w*[._A-Za-z]\w*/,
+
+    alphanumeric_lit: $ => /\w[a-zA-Z0-9_]\w*/,
+
     hexadecimal_lit: $ => /0[xX]\w[0-9a-fA-F]\w*/,
 
     dollar_lit: $ => /\$\w*[A-Za-z]\w*/,
@@ -85,15 +118,31 @@ module.exports = grammar({
     numeric_lit: $ => /(0|[1-9][0-9]*)/,
 
     pred_value: $ => choice(
-      $.pred_lit,
-      seq($.string_lit, choice("as", "AS"), $.pred_lit),
-      seq("expand", "(", $.string_lit, ")"),
+      prec(0, $.pred_lit),
+      seq("math", "(", $.math_expr, ")"),
+      prec(1, seq($.identifier, "(", $.pred_value, ")")),
     ),
 
+    math_expr: $ => choice(
+      $.math_binary_expr,
+      $.math_func_unary,
+      $.math_func_tri,
+      $.value,
+      $.math_func_binary,
+    ),
+
+    math_binary_expr: $ => prec.left(2, seq($.math_expr, choice("+", "-", "*", "/", "%", "<", ">", "<=", ">=", "==", "!="), $.math_expr)),
+
+    math_func_unary: $ => prec.left(3, seq(choice("floor", "ceil", "ln", "exp", "sqrt", "since", "min", "max"), "(", $.math_expr, ")")),
+
+    math_func_binary: $ => prec.left(2, seq(choice("pow", "logbase"), "(", $.math_expr, ",", $.math_expr, ")")),
+
+    math_func_tri: $ => seq("cond", "(", $.math_expr, ",", $.math_expr, ",", $.math_expr, ")"),
+
     pred_lit: $ => choice(
-      $.string_lit,
-      seq($.string_lit, "@", $.string_lit),
-      seq("~", $.string_lit)
+      $.identifier,
+      seq($.identifier, "@", $.identifier),
+      seq("~", $.identifier)
     ),
   }
 });
@@ -108,4 +157,8 @@ function commaSep1(rule) {
 
 function commaSep(rule) {
   return optional(commaSep1(rule))
+}
+
+function optionalSeq(rule) {
+
 }
