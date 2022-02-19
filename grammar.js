@@ -38,14 +38,15 @@ module.exports = grammar({
 
     comment: $ => token(prec(-10, /#.*\n*/)),
 
-    query_root: $ => seq("query",
+    query_root: $ => seq(optional("query"),
       field("name", optional($.identifier)),
       field("args", optional($.query_args)),
-      field("query", seq('{', repeat($.query), '}'))),
+      field("query", block(repeat1($.query))),
+      field("fragments", repeat($.fragment))),
 
     query_args: $ => seq('(', commaSep($.query_args_value), ')'),
 
-    query_args_value: $ => seq("$", field("name", $.identifier), ':', field("type", $.identifier), field("value", optional(seq("=", $.escaped_string_lit)))),
+    query_args_value: $ => seq("$", field("name", $.identifier), ':', field("type", $.identifier), field("value", optional(seq("=", $.interpreted_string_literal)))),
 
     query: $ => seq(
       field("name", $.identifier), "(", "func", ":",
@@ -68,7 +69,15 @@ module.exports = grammar({
       $.filter_binary,
     ),
 
+    fragment: $ => seq("fragment",
+      field("name", $.identifier),
+      field("values", block(repeat1($.fragment_inner)))),
 
+    fragment_inner: $ =>
+      choice(
+        seq("...", $.identifier),
+        seq($.pred_lit, optional(block($.fragment_inner)))
+      ),
 
     filter_unary: $ => prec.left(3, seq(choice("not", "NOT"), $.filter_expr)),
 
@@ -98,15 +107,32 @@ module.exports = grammar({
     ),
 
     value: $ => choice(
-      $.escaped_string_lit,
+      $.interpreted_string_literal,
       $.dollar_lit,
       hexLiteral,
       decimalLiteral,
       $.pred_lit
     ),
 
-    escaped_string_lit: $ => seq("\"", optional($.identifier), "\""),
+    interpreted_string_literal: $ => seq(
+      '"',
+      repeat(choice(
+        token.immediate(prec(1, /[^"\n\\]+/)),
+        $.escape_sequence
+      )),
+      '"'
+    ),
 
+    escape_sequence: $ => token.immediate(seq(
+      '\\',
+      choice(
+        /[^xuU]/,
+        /\d{2,3}/,
+        /x[0-9a-fA-F]{2,}/,
+        /u[0-9a-fA-F]{4}/,
+        /U[0-9a-fA-F]{8}/
+      )
+    )),
     identifier: $ => /\w*[._A-Za-z]\w*/,
 
     alphanumeric_lit: $ => /\w[a-zA-Z0-9_]\w*/,
