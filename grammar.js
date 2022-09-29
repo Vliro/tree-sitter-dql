@@ -1,11 +1,4 @@
-const
-
-  FILTER_PREC = {
-    NOT: 2,
-    AND: 1,
-    OR: 0
-  },
-  hexDigit = /[0-9a-fA-F]/,
+hexDigit = /[0-9a-fA-F]/,
   octalDigit = /[0-7]/,
   decimalDigit = /[0-9]/,
   binaryDigit = /[01]/,
@@ -22,9 +15,7 @@ const
 module.exports = grammar({
   name: 'dql',
 
-  inline: $ => [$.function_val],
-
-
+  inline: $ => [$.function_val, $.math_binary_expr, $.math_func_unary, $.math_func_tri],
   extras: $ => [
     /\s/,
     $.comment,
@@ -48,16 +39,35 @@ module.exports = grammar({
 
     query_args_value: $ => seq("$", field("name", $.identifier), ':', field("type", $.identifier), field("value", optional(seq("=", $.interpreted_string_literal)))),
 
-    query: $ => seq(
-      field("name", $.identifier), "(", "func", ":",
-      field("function", $.function),
-      field("page_ord", optional(seq(",", $.page_order))), ")",
+    inner_query: $ => prec(1, seq(field("name", $.identifier),
+      "(",
+      optional(seq("func", ":", field("function", $.function))),
+      field("page_ord", optional(seq(",", commaSep1($.page_order)))),
+      ")",
       field("filter", optional($.filter)),
       field("directive", repeat($.directive)),
-      field("query", block(repeat($.query_line)))),
+      field("statement", block(repeat($.query_line))))),
 
-    query_line: $ => seq(optional(seq(field("alias", $.identifier), ":")), choice(seq(field("variable", $.identifier), choice("as", "AS"), field("value", $.pred_value)), field("value", $.pred_value)),
-      field("filter", optional($.filter)), field("groupby", optional($.groupby)), field("page_ord", optional(seq("(", $.page_order, ")"))), field("query", optional(block(repeat($.query_line))))),
+    query: $ => choice(
+      seq(optional(seq(field("prename", $.identifier), ci("as"))), $.inner_query),
+      seq(field("prename", $.identifier), ci("as"), $.query_line),
+      seq(field("name", $.identifier), ci("as"), "shortest", "(", commaSep1($.shortest_expr), ")", field("line", optional(block(repeat($.query_line))))),
+    ),
+
+    shortest_expr: $ => seq(
+      choice("from", "to", "numpaths", "minweight", "maxweight"), ":",
+      $.value),
+
+    query_line: $ => seq(optional(seq(field("alias", $.identifier), ":")),
+      choice(seq(field("variable", $.identifier),
+        choice("as", "AS"), field("value", $.pred_value)),
+        field("value", $.pred_value)),
+      repeat(choice(
+        field("filter", $.filter),
+        field("groupby", $.groupby),
+        field("facet", $.facet),
+        field("page_ord", seq("(", $.page_order, ")")))),
+      field("line", optional(block(repeat($.query_line))))),
 
     directive: $ => seq("@", field("name", $.identifier), optional(seq("(", field("values", commaSep(seq($.identifier, ":", $.value))), ")"))),
 
@@ -79,22 +89,29 @@ module.exports = grammar({
         seq($.pred_lit, optional(block($.fragment_inner)))
       ),
 
-    filter_unary: $ => prec.left(3, seq(choice("not", "NOT"), $.filter_expr)),
+    filter_unary: $ => prec.left(3, seq(ci("not"), $.filter_expr)),
 
     filter_binary: $ => choice(
-      prec.left(1, seq($.filter_expr, choice("or", "OR"), $.filter_expr)),
-      prec.left(2, seq($.filter_expr, choice("and", "AND"), $.filter_expr))),
+      prec.left(1, seq($.filter_expr, ci("or"), $.filter_expr)),
+      prec.left(2, seq($.filter_expr, ci("and"), $.filter_expr))),
 
-    facet: $ => seq("@facets", optional("(",), commaSep(choice(
+    facet_unary: $ => prec.left(3, seq(ci("not"), $.facet_expr)),
+
+    facet_binary: $ => choice(
+      prec.left(1, seq($.facet_expr, ci("or"), $.facet_expr)),
+      prec.left(2, seq($.facet_expr, ci("and"), $.facet_expr))),
+
+    facet_expr: $ => choice($.facet_unary, $.facet_binary, commaSep1(choice(
       $.function,
       $.pred_lit,
       seq($.pred_lit, ":", $.pred_lit),
     ))),
+    facet: $ => prec.right(seq("@facets", optional(seq("(", $.facet_expr, ")")))),
 
-    page_order: $ => commaSep1(
+    page_order: $ => prec.right(commaSep1(
       choice(
-        seq(choice("first", "offset", "after"), ":", $.value)),
-      seq(choice("orderasc", "orderdesc"), ":", $.value)),
+        seq(choice("first", "offset", "after"), ":", $.value),
+        seq(choice("orderasc", "orderdesc"), ":", $.value)))),
 
     function: $ => seq(field("name", $.identifier), "(",
       field("value", $.expr), ")"),
@@ -111,8 +128,11 @@ module.exports = grammar({
       $.dollar_lit,
       hexLiteral,
       decimalLiteral,
-      $.pred_lit
+      $.pred_lit,
+      seq("val", "(", $.value, ")")
     ),
+
+    all_value: $ => choice($.pred_value, $.value),
 
     interpreted_string_literal: $ => seq(
       '"',
@@ -133,7 +153,7 @@ module.exports = grammar({
         /U[0-9a-fA-F]{8}/
       )
     )),
-    identifier: $ => /\w*[._A-Za-z]\w*/,
+    identifier: $ => /\w*[._A-Za-z~_]\w*/,
 
     alphanumeric_lit: $ => /\w[a-zA-Z0-9_]\w*/,
 
@@ -146,10 +166,12 @@ module.exports = grammar({
     pred_value: $ => choice(
       prec(0, $.pred_lit),
       seq("math", "(", $.math_expr, ")"),
-      prec(1, seq($.identifier, "(", $.pred_value, ")")),
+      prec(1, seq(choice("min", "count", "max", "sum", "avg", "val"), "(", $.pred_value, ")")),
     ),
 
     math_expr: $ => choice(
+      //evaluate parenthesis first
+      prec(10, seq("(", $.math_expr, ")")),
       $.math_binary_expr,
       $.math_func_unary,
       $.math_func_tri,
@@ -163,12 +185,11 @@ module.exports = grammar({
 
     math_func_binary: $ => prec.left(2, seq(choice("pow", "logbase"), "(", $.math_expr, ",", $.math_expr, ")")),
 
-    math_func_tri: $ => seq("cond", "(", $.math_expr, ",", $.math_expr, ",", $.math_expr, ")"),
+    math_func_tri: $ => prec.left(1, seq("cond", "(", $.math_expr, ",", $.math_expr, ",", $.math_expr, ")")),
 
     pred_lit: $ => choice(
-      $.identifier,
-      seq($.identifier, "@", $.identifier),
-      seq("~", $.identifier)
+      field("name", $.identifier),
+      seq(field("name", $.identifier), "@", field("language", $.identifier)),
     ),
   }
 });
@@ -187,4 +208,12 @@ function commaSep(rule) {
 
 function optionalSeq(rule) {
 
+}
+//case insensitive
+function ci(keyword) {
+  return new RegExp(keyword
+    .split('')
+    .map(letter => `[${letter}${letter.toUpperCase()}]`)
+    .join('')
+  )
 }
