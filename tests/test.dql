@@ -11,7 +11,13 @@
 
   TopMovies(func: uid(films), orderdesc: val(score)) @filter(gt(val(score), 2)){
     name@en
+    yolo {
+        new_pred (orderasc: 5, first: 10) @facets(type(USER) AND NOT eq(user, "Cool")) {
+            inner @groupby(yolo)
+        }
+    }
     val(score)
     val(date)
+    type as val(id)
   }
 }

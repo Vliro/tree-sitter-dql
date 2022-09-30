@@ -54,8 +54,12 @@
   "cond"
   "since"
   "orderdesc"
+  "orderasc"
+  "first"
+  "after"
   "@filter"
   "@facets"
+  "@groupby"
   "as"
   "func"
 ] @keyword
