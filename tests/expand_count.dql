@@ -1,0 +1,10 @@
+{
+  uids(func: has(director.film), first: 1) {
+    uid
+    expand(_all_) { u as uid }
+  }
+
+  result(func: uid(u)) {
+    count(uid)
+  }
+}

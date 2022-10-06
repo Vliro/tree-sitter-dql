@@ -1,0 +1,12 @@
+{
+   people(func: eq(dgraph.type, "Person")) {
+      name
+      dgraph.type
+   }
+   people(func: type(Person)) {
+      name
+      dgraph.type
+      expand(_all_)
+   }
+}
+

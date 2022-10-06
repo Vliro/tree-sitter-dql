@@ -11,8 +11,6 @@
 (query_line
   variable: (identifier) @function)
 
-
-
 (directive
   name: (identifier) @function)
 
@@ -54,11 +52,14 @@
   "cond"
   "since"
   "orderdesc"
+  "expand"
   "orderasc"
   "first"
   "after"
+  "fragment"
   "@filter"
   "@facets"
+  "AS"
   "@groupby"
   "as"
   "func"
@@ -70,11 +71,8 @@
 
 (comment) @comment
 
-(pred_lit) @number
 
 (value) @number
-
-
 
 "math" @function
 "val" @function

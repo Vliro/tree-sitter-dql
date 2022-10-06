@@ -1,0 +1,9 @@
+{
+  all(func: eq(name@en, "Harry Potter")) @filter(type(Series)) {
+    name@en
+    expand(Series) {
+      name@en
+      expand(Film)
+    }
+  }
+}

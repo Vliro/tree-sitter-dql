@@ -37,7 +37,7 @@ module.exports = grammar({
 
     query_args: $ => seq('(', commaSep($.query_args_value), ')'),
 
-    query_args_value: $ => seq("$", field("name", $.identifier), ':', field("type", $.identifier), field("value", optional(seq("=", $.interpreted_string_literal)))),
+    query_args_value: $ => seq("$", field("name", $.identifier), ':', field("type", $.identifier), field("value", optional(seq("=", $.value))), optional('!')),
 
     inner_query: $ => prec(1, seq(field("name", $.identifier),
       "(",
@@ -59,14 +59,14 @@ module.exports = grammar({
       $.value),
 
     query_line: $ => seq(optional(seq(field("alias", $.identifier), ":")),
-      choice(seq(field("variable", $.identifier),
-        choice("as", "AS"), field("value", $.pred_value)),
-        field("value", $.pred_value)),
+      choice(prec(2,seq(field("variable", $.identifier),
+        choice("as", "AS"), field("value", $.value))),
+        field("value", $.value)),
       repeat(choice(
         field("filter", $.filter),
         field("groupby", $.groupby),
         field("facet", $.facet),
-        field("page_ord", seq("(", $.page_order, ")")))),
+        prec(1,field("page_ord", seq("(", commaSep1($.page_order), ")"))))),
       field("line", optional(block(repeat($.query_line))))),
 
     directive: $ => seq("@", field("name", $.identifier), optional(seq("(", field("values", commaSep(seq($.identifier, ":", $.value))), ")"))),
@@ -85,8 +85,8 @@ module.exports = grammar({
 
     fragment_inner: $ =>
       choice(
-        seq("...", $.identifier),
-        seq($.pred_lit, optional(block($.fragment_inner)))
+        seq(optional("..."), $.identifier),
+        seq($.language_lit, optional(block($.fragment_inner)))
       ),
 
     filter_unary: $ => prec.left(3, seq(ci("not"), $.filter_expr)),
@@ -103,24 +103,24 @@ module.exports = grammar({
 
     facet_expr: $ => choice($.facet_unary, $.facet_binary, commaSep1(choice(
       $.function,
-      $.pred_lit,
-      seq($.pred_lit, ":", $.pred_lit),
+      $.language_lit,
+      seq($.language_lit, ":", $.language_lit),
+      seq($.language_lit, ci("as"), $.value),
     ))),
     facet: $ => prec.right(seq("@facets", optional(seq("(", $.facet_expr, ")")))),
 
-    page_order: $ => prec.right(commaSep1(
+    page_order: $ => prec.left(commaSep1(
       choice(
         seq(choice("first", "offset", "after"), ":", $.value),
         seq(choice("orderasc", "orderdesc"), ":", $.value)))),
 
-    function: $ => seq(field("name", $.identifier), "(",
-      field("value", $.expr), ")"),
+    function: $ => seq(field("name", $.identifier), "(", field("value", $.expr), ")"),
 
-    groupby: $ => seq("@groupby", "(", $.pred_lit, ")"),
+    groupby: $ => seq("@groupby", "(", $.value, ")"),
 
     expr: $ => choice(
       commaSep1($.value),
-      seq($.pred_lit, "[", commaSep1($.value), "]"),
+      seq($.value, ",", "[", commaSep1($.value), "]"),
     ),
 
     value: $ => choice(
@@ -128,11 +128,12 @@ module.exports = grammar({
       $.dollar_lit,
       hexLiteral,
       decimalLiteral,
-      $.pred_lit,
-      seq("val", "(", $.value, ")")
+      $.identifier,
+      $.language_lit,
+      $.math_value,
+      seq("...", $.identifier),
+      seq($.value, "(", $.value, ")"),
     ),
-
-    all_value: $ => choice($.pred_value, $.value),
 
     interpreted_string_literal: $ => seq(
       '"',
@@ -153,7 +154,9 @@ module.exports = grammar({
         /U[0-9a-fA-F]{8}/
       )
     )),
-    identifier: $ => /\w*[._A-Za-z~_]\w*/,
+    identifier: $ => /\w*[A-Z_a-z~]\.?\w*/,
+
+    lang_identifier: $ => /[._A-Za-z~_:*]*/,
 
     alphanumeric_lit: $ => /\w[a-zA-Z0-9_]\w*/,
 
@@ -163,11 +166,7 @@ module.exports = grammar({
 
     numeric_lit: $ => /(0|[1-9][0-9]*)/,
 
-    pred_value: $ => choice(
-      prec(0, $.pred_lit),
-      seq("math", "(", $.math_expr, ")"),
-      prec(1, seq(choice("min", "count", "max", "sum", "avg", "val"), "(", $.pred_value, ")")),
-    ),
+    math_value: $ => seq("math", "(", $.math_expr, ")"),
 
     math_expr: $ => choice(
       //evaluate parenthesis first
@@ -187,9 +186,9 @@ module.exports = grammar({
 
     math_func_tri: $ => prec.left(1, seq("cond", "(", $.math_expr, ",", $.math_expr, ",", $.math_expr, ")")),
 
-    pred_lit: $ => choice(
+    language_lit: $ => seq(
       field("name", $.identifier),
-      seq(field("name", $.identifier), "@", field("language", $.identifier)),
+      seq("@", field("language", $.lang_identifier)),
     ),
   }
 });

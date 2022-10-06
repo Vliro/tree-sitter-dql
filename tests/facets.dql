@@ -1,0 +1,8 @@
+{
+  var(func: has(rated)) {
+    num_rated as math(1)
+    rated @facets(r as rating) {
+      avg_rating as math(r / num_rated)
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  me(func: count(test)) @filter(has(director.film)) {
+    name@en
+    director.film @filter(allofterms(name@en, "jones indiana") OR allofterms(name@en, "jurassic park"))  {
+      uid
+      name@en
+    }
+  }
+}
